@@ -376,6 +376,90 @@ function format_minutes(int $minutes): string {
 }
 
 /**
+ * Filtered, paginated attendance history for one student. Always scoped to $userId
+ * (callers must derive this from the server-side session — see
+ * student/attendance_history.php) — never accepts a caller-supplied identifier, so
+ * there is no query shape that can leak another student's rows.
+ *
+ * $filters: from/to (Y-m-d, optional), status ('all'|'present'|'late'|'incomplete'),
+ * page, per_page. Returns ['rows' => [...], 'total' => int].
+ */
+function get_attendance_history(int $userId, array $filters): array {
+    global $pdo;
+
+    $where = ['user_id = :user_id'];
+    $params = ['user_id' => $userId];
+
+    if (!empty($filters['from'])) {
+        $where[] = 'attendance_date >= :from';
+        $params['from'] = $filters['from'];
+    }
+    if (!empty($filters['to'])) {
+        $where[] = 'attendance_date <= :to';
+        $params['to'] = $filters['to'];
+    }
+
+    $status = $filters['status'] ?? 'all';
+    if ($status === 'present') {
+        $where[] = "status = 'present'";
+    } elseif ($status === 'late') {
+        $where[] = "status = 'late'";
+    } elseif ($status === 'incomplete') {
+        $where[] = 'time_out IS NULL';
+    }
+
+    $whereSql = implode(' AND ', $where);
+
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM attendance WHERE {$whereSql}");
+    $countStmt->execute($params);
+    $total = (int) $countStmt->fetchColumn();
+
+    // LIMIT/OFFSET are interpolated (not bound as placeholders) because they are
+    // validated PHP ints by this point, never raw request strings — PDO's native
+    // prepares (this project runs EMULATE_PREPARES => false) require these as an
+    // actual integer type, which execute()'s string-keyed array can't guarantee.
+    $perPage = max(1, min(100, (int) ($filters['per_page'] ?? 20)));
+    $page = max(1, (int) ($filters['page'] ?? 1));
+    $offset = ($page - 1) * $perPage;
+
+    // break_start/break_end are always NULL in this break-less version, but are
+    // still selected because calculate_worked_minutes() (the single source of
+    // truth for worked-hours math, reused here rather than recalculated) expects
+    // those array keys to be present.
+    $stmt = $pdo->prepare(
+        "SELECT id, attendance_date, time_in, time_out, status, break_start, break_end
+         FROM attendance
+         WHERE {$whereSql}
+         ORDER BY attendance_date DESC
+         LIMIT {$perPage} OFFSET {$offset}"
+    );
+    $stmt->execute($params);
+
+    return ['rows' => $stmt->fetchAll(), 'total' => $total];
+}
+
+/**
+ * Lifetime day-count stats for one student. Present/Late reflect the punctuality
+ * status fixed once at Time In (see do_time_in()) — independent of whether that
+ * day's session has since been completed.
+ */
+function get_attendance_stats(int $userId): array {
+    global $pdo;
+    $stmt = $pdo->prepare(
+        "SELECT
+            COALESCE(SUM(status = 'present'), 0) AS days_present,
+            COALESCE(SUM(status = 'late'), 0) AS late_days
+         FROM attendance WHERE user_id = ?"
+    );
+    $stmt->execute([$userId]);
+    $row = $stmt->fetch();
+    return [
+        'days_present' => (int) $row['days_present'],
+        'late_days' => (int) $row['late_days'],
+    ];
+}
+
+/**
  * Required/completed/remaining minutes + percent, derived live from completed
  * (time_out IS NOT NULL) attendance rows only — never a stored/editable total.
  */
