@@ -16,10 +16,6 @@ $profile = $stmt->fetch() ?: [];
 
 $greetingName = $profile['first_name'] ?? explode(' ', $user['full_name'])[0];
 
-$ojtStatusLabels = ['not_started' => 'Not Started', 'ongoing' => 'Ongoing', 'completed' => 'Completed'];
-$ojtStatusKey = $profile['ojt_status'] ?? 'not_started';
-$ojtStatusLabel = $ojtStatusLabels[$ojtStatusKey] ?? 'Not Started';
-
 $today = get_today_attendance($user['id']);
 
 if (!$today || !$today['time_in']) {
@@ -30,7 +26,11 @@ if (!$today || !$today['time_in']) {
     $attendanceState = 'completed';
 }
 
+// The displayed OJT status is derived live from the same numbers shown in the
+// Progress card below — never read from the stored student_profiles.ojt_status
+// column — so it can never disagree with the hours on screen.
 $summary = calculate_ojt_summary($user['id']);
+$ojtStatus = ojt_status_from_summary($summary);
 
 $stmt = $pdo->prepare(
     'SELECT attendance_date, time_in, time_out, break_start, break_end
@@ -62,7 +62,7 @@ include __DIR__ . '/../includes/partials/header.php';
     <div><dt>Course / Program</dt><dd><?= e($profile['course'] ?? 'Not set') ?></dd></div>
     <div><dt>Year Level</dt><dd><?= e($profile['year_level'] ?? 'Not set') ?></dd></div>
     <div><dt>Company</dt><dd><?= e($profile['company'] ?? 'Not set') ?></dd></div>
-    <div><dt>OJT Status</dt><dd><span class="status-pill status-<?= e($ojtStatusKey) ?>"><?= e(strtoupper($ojtStatusLabel)) ?></span></dd></div>
+    <div><dt>OJT Status</dt><dd><span class="status-pill status-<?= e($ojtStatus['key']) ?>"><?= e(strtoupper($ojtStatus['label'])) ?></span></dd></div>
   </dl>
 </div>
 
@@ -117,15 +117,15 @@ include __DIR__ . '/../includes/partials/header.php';
 
   <div class="stat-tile-row">
     <div class="stat-tile">
-      <span class="stat-value"><?= e(number_format($summary['required_minutes'] / 60, 1)) ?> hrs</span>
+      <span class="stat-value"><?= e(number_format($summary['required_minutes'] / 60, 2)) ?> hrs</span>
       <span class="stat-label">Required Hours</span>
     </div>
     <div class="stat-tile">
-      <span class="stat-value"><?= e(number_format($summary['completed_minutes'] / 60, 1)) ?> hrs</span>
+      <span class="stat-value"><?= e(number_format($summary['completed_minutes'] / 60, 2)) ?> hrs</span>
       <span class="stat-label">Completed</span>
     </div>
     <div class="stat-tile">
-      <span class="stat-value"><?= e(number_format($summary['remaining_minutes'] / 60, 1)) ?> hrs</span>
+      <span class="stat-value"><?= e(number_format($summary['remaining_minutes'] / 60, 2)) ?> hrs</span>
       <span class="stat-label">Remaining</span>
     </div>
   </div>
@@ -136,6 +136,10 @@ include __DIR__ . '/../includes/partials/header.php';
     </div>
     <span class="progress-percent"><?= e(number_format($summary['percent'], 2)) ?>%</span>
   </div>
+
+  <p class="attendance-status" style="margin:16px 0 0;">
+    Status: <span class="status-pill status-<?= e($ojtStatus['key']) ?>"><?= e(strtoupper($ojtStatus['label'])) ?></span>
+  </p>
 </div>
 
 <div class="card card-wide" style="margin-top:20px;">

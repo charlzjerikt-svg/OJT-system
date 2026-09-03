@@ -72,7 +72,12 @@ $history = get_attendance_history($user['id'], [
 
 $stats = get_attendance_stats($user['id']);
 $summary = calculate_ojt_summary($user['id']);
+$ojtStatus = ojt_status_from_summary($summary);
 $totalPages = max(1, (int) ceil($history['total'] / $perPage));
+
+function fmt_hours(int $minutes): string {
+    return number_format($minutes / 60, 2) . ' hrs';
+}
 
 /** Builds a link to this same page with $overrides merged over the current query string. */
 function history_url(array $overrides = []): string {
@@ -100,7 +105,7 @@ include __DIR__ . '/../includes/partials/header.php';
       <span class="stat-label">Days Present</span>
     </div>
     <div class="stat-tile">
-      <span class="stat-value"><?= e(format_minutes($summary['completed_minutes'])) ?></span>
+      <span class="stat-value"><?= e(fmt_hours($summary['completed_minutes'])) ?></span>
       <span class="stat-label">Total Worked Hours</span>
     </div>
     <div class="stat-tile">
@@ -108,10 +113,16 @@ include __DIR__ . '/../includes/partials/header.php';
       <span class="stat-label">Late Days</span>
     </div>
     <div class="stat-tile">
-      <span class="stat-value"><?= e(format_minutes($summary['remaining_minutes'])) ?></span>
+      <span class="stat-value"><?= e(fmt_hours($summary['remaining_minutes'])) ?></span>
       <span class="stat-label">OJT Hours Remaining</span>
     </div>
   </div>
+
+  <p class="field-hint">
+    Required: <?= e(fmt_hours($summary['required_minutes'])) ?>
+    &middot; Progress: <?= e(number_format($summary['percent'], 2)) ?>%
+    &middot; Status: <span class="status-pill status-<?= e($ojtStatus['key']) ?>"><?= e(strtoupper($ojtStatus['label'])) ?></span>
+  </p>
 
   <nav class="tab-row">
     <?php foreach ($rangeLabels as $key => $label): ?>

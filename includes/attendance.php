@@ -376,6 +376,28 @@ function format_minutes(int $minutes): string {
 }
 
 /**
+ * Derives the OJT status purely from calculate_ojt_summary()'s own numbers — never
+ * from the stored student_profiles.ojt_status column. That column is still updated
+ * as a side effect inside do_time_in()/do_time_out() (it drives the "OJT completed"
+ * notification), but it must never be the thing a page *displays*: this function is
+ * what guarantees the shown status can never disagree with the shown hours, even in
+ * an edge case the stored column hasn't caught up to yet.
+ */
+function ojt_status_from_summary(array $summary): array {
+    $labels = ['not_started' => 'Not Started', 'ongoing' => 'In Progress', 'completed' => 'Completed'];
+
+    if ($summary['required_minutes'] <= 0 || $summary['completed_minutes'] <= 0) {
+        $key = 'not_started';
+    } elseif ($summary['completed_minutes'] >= $summary['required_minutes']) {
+        $key = 'completed';
+    } else {
+        $key = 'ongoing';
+    }
+
+    return ['key' => $key, 'label' => $labels[$key]];
+}
+
+/**
  * Filtered, paginated attendance history for one student. Always scoped to $userId
  * (callers must derive this from the server-side session — see
  * student/attendance_history.php) — never accepts a caller-supplied identifier, so
