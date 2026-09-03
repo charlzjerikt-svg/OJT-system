@@ -108,7 +108,7 @@ include __DIR__ . '/../includes/partials/header.php';
   <?php elseif ($attendanceState === 'timed_in'): ?>
     <button type="button" class="btn" id="timeOutBtn" data-action="time_out" data-csrf="<?= e(csrf_token()) ?>" data-action-url="<?= APP_URL ?>/student/attendance_action.php">TIME OUT</button>
   <?php else: ?>
-    <p class="field-hint">You've completed today's attendance. See you next shift!</p>
+    <div class="alert alert-success" style="margin:0;">&#10003; WORK DAY COMPLETED — see you next shift!</div>
   <?php endif; ?>
 </div>
 

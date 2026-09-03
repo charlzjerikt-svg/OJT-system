@@ -233,52 +233,102 @@ function do_end_break(int $userId): array {
     return ['ok' => true, 'message' => 'Break ended at ' . $now->format('g:i A') . ". Break duration: {$duration}."];
 }
 
+/**
+ * Time Out is authenticated/authorized entirely from $userId (server-side session —
+ * see student/attendance_action.php), never from a client-supplied attendance ID or
+ * student ID. The timestamp is always server-generated. "COMPLETED" (returned in
+ * 'status' below) is a computed workflow state, not a stored value — attendance.status
+ * stays the punctuality flag ('present'/'late') set once at Time In; conflating the two
+ * would be a schema regression, not a fix.
+ */
 function do_time_out(int $userId): array {
     global $pdo;
     $now = new DateTime();
 
-    $stmt = $pdo->prepare(
-        'UPDATE attendance SET time_out = ?
-         WHERE user_id = ? AND time_out IS NULL AND time_in IS NOT NULL
-           AND (break_start IS NULL OR break_end IS NOT NULL)'
-    );
-    $stmt->execute([$now->format('Y-m-d H:i:s'), $userId]);
-
-    if ($stmt->rowCount() === 0) {
-        $row = get_today_attendance($userId);
-        if (!$row || !$row['time_in']) {
-            return ['ok' => false, 'error' => 'You must Time In before timing out.'];
+    // Pre-check outside the transaction: cheap, and gives a precise NO_ACTIVE_SESSION
+    // vs ALREADY_TIMED_OUT message. The atomic UPDATE below (scoped to this exact row's
+    // id) is what actually guarantees correctness under a race — this pre-check can go
+    // stale between here and the UPDATE, and that's fine, it's just handled below.
+    $openRow = get_open_attendance_row($userId);
+    if (!$openRow) {
+        $stmtCheck = $pdo->prepare(
+            'SELECT 1 FROM attendance WHERE user_id = ? AND attendance_date = ? AND time_out IS NOT NULL LIMIT 1'
+        );
+        $stmtCheck->execute([$userId, $now->format('Y-m-d')]);
+        if ($stmtCheck->fetchColumn()) {
+            return ['ok' => false, 'code' => 'ALREADY_TIMED_OUT', 'error' => 'You have already timed out today.'];
         }
-        if ($row['time_out']) {
-            return ['ok' => false, 'error' => 'You have already timed out today.'];
-        }
-        if ($row['break_start'] && !$row['break_end']) {
-            return ['ok' => false, 'error' => 'Please end your break before timing out.'];
-        }
-        return ['ok' => false, 'error' => 'Unable to record Time Out.'];
+        return ['ok' => false, 'code' => 'NO_ACTIVE_SESSION', 'error' => 'You cannot Time Out because you have not Timed In today.'];
     }
 
-    $row = get_today_attendance($userId);
-    $workedMinutes = calculate_worked_minutes($row, false);
-    $h = intdiv($workedMinutes, 60);
-    $m = $workedMinutes % 60;
-    $hoursText = "{$h}h " . str_pad((string) $m, 2, '0', STR_PAD_LEFT) . 'm';
+    if ($openRow['break_start'] && !$openRow['break_end']) {
+        return ['ok' => false, 'code' => 'BREAK_IN_PROGRESS', 'error' => 'Please end your break before timing out.'];
+    }
 
+    $ojtCompletedNow = false;
+    $workedMinutes = 0;
+
+    $pdo->beginTransaction();
+    try {
+        // Scoped to this exact row's primary key (captured above) plus the same
+        // time_out IS NULL guard — row-level locking makes this atomic: under a true
+        // race, only the first concurrent request can ever match and update it.
+        $stmt = $pdo->prepare(
+            'UPDATE attendance SET time_out = ?
+             WHERE id = ? AND user_id = ? AND time_out IS NULL AND time_in IS NOT NULL
+               AND (break_start IS NULL OR break_end IS NOT NULL)'
+        );
+        $stmt->execute([$now->format('Y-m-d H:i:s'), $openRow['id'], $userId]);
+
+        if ($stmt->rowCount() === 0) {
+            $pdo->rollBack();
+            return ['ok' => false, 'code' => 'ALREADY_TIMED_OUT', 'error' => 'You have already timed out today.'];
+        }
+
+        // TOTAL WORKED = Time Out − Time In, computed from the actual stored
+        // datetimes (never a formatted display string). No break deduction: this
+        // version has no break functionality, and break_start/break_end are never set.
+        $workedMinutes = max(0, (int) round(($now->getTimestamp() - strtotime($openRow['time_in'])) / 60));
+
+        $summary = calculate_ojt_summary($userId);
+        // Same connection/transaction sees its own uncommitted write above, so this
+        // already reflects today's just-recorded hours.
+        if ($summary['remaining_minutes'] <= 0) {
+            $profileStmt = $pdo->prepare('SELECT ojt_status FROM student_profiles WHERE user_id = ?');
+            $profileStmt->execute([$userId]);
+            if ($profileStmt->fetchColumn() !== 'completed') {
+                $pdo->prepare('UPDATE student_profiles SET ojt_status = ? WHERE user_id = ?')
+                    ->execute(['completed', $userId]);
+                $ojtCompletedNow = true;
+            }
+        }
+
+        $pdo->commit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        error_log('do_time_out failed: ' . $e->getMessage());
+        return ['ok' => false, 'code' => 'SERVER_ERROR', 'error' => 'Something went wrong recording your Time Out. Please try again.'];
+    }
+
+    $hoursText = format_minutes($workedMinutes);
+
+    // Best-effort side effects, deliberately outside the transaction — a notification
+    // insert failing here must never roll back an already-committed Time Out.
     notify_user($userId, 'time_out', 'Time Out Recorded', 'Your Time Out was recorded at ' . $now->format('g:i:s A') . ". Working hours: {$hoursText}.");
-
-    $summary = calculate_ojt_summary($userId);
-    if ($summary['remaining_minutes'] <= 0) {
-        $profileStmt = $pdo->prepare('SELECT ojt_status FROM student_profiles WHERE user_id = ?');
-        $profileStmt->execute([$userId]);
-        $currentStatus = $profileStmt->fetchColumn();
-        if ($currentStatus !== 'completed') {
-            $pdo->prepare('UPDATE student_profiles SET ojt_status = ? WHERE user_id = ?')
-                ->execute(['completed', $userId]);
-            notify_user($userId, 'ojt_completed', 'OJT Requirement Completed', 'Congratulations! You have completed your required OJT hours.');
-        }
+    if ($ojtCompletedNow) {
+        notify_user($userId, 'ojt_completed', 'OJT Requirement Completed', 'Congratulations! You have completed your required OJT hours.');
     }
 
-    return ['ok' => true, 'message' => 'Time Out recorded at ' . $now->format('g:i:s A') . ". Today's working hours: {$hoursText}."];
+    return [
+        'ok' => true,
+        'code' => 'OK',
+        'message' => 'Time Out recorded at ' . $now->format('g:i:s A') . ". Today's working hours: {$hoursText}.",
+        'attendance_date' => $openRow['attendance_date'],
+        'time_in' => date('g:i:s A', strtotime($openRow['time_in'])),
+        'time_out' => $now->format('g:i:s A'),
+        'total_hours' => $hoursText,
+        'status' => 'COMPLETED',
+    ];
 }
 
 /**

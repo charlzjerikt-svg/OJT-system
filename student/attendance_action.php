@@ -46,5 +46,13 @@ if ($action === 'time_in') {
         'time_in' => $result['time_in'],
         'status' => strtoupper($result['status']),
     ];
+} elseif ($action === 'time_out') {
+    $response['data'] = [
+        'attendance_date' => $result['attendance_date'],
+        'time_in' => $result['time_in'],
+        'time_out' => $result['time_out'],
+        'total_hours' => $result['total_hours'],
+        'status' => $result['status'],
+    ];
 }
 json_response($response);
