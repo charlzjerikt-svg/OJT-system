@@ -1,0 +1,12 @@
+# Uploaded files are user-supplied — never execute anything from here,
+# even if a validation check is ever bypassed upstream.
+<IfModule mod_php7.c>
+  php_flag engine off
+</IfModule>
+<IfModule mod_php.c>
+  php_flag engine off
+</IfModule>
+<FilesMatch "\.(php|phtml|php\d?|phar)$">
+  Require all denied
+</FilesMatch>
+Options -Indexes -ExecCGI

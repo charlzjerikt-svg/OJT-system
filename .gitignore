@@ -1,0 +1,21 @@
+# Local secrets — never commit real credentials.
+config/config.php
+
+# User-uploaded content — not part of source, and may contain personal data.
+uploads/profile_pictures/*
+!uploads/profile_pictures/.gitkeep
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# PHP / dependency artifacts
+vendor/
+composer.lock
+*.log
+
+# Local Claude Code project settings
+.claude/settings.local.json
