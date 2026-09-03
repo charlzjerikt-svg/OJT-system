@@ -441,6 +441,8 @@ select.input-success {
 .status-pill.status-completed { background: var(--color-success-bg); color: var(--color-success); }
 .status-pill.status-not_timed_in,
 .status-pill.status-not_started { background: var(--color-bg); color: var(--color-text-muted); }
+.status-pill.status-present { background: var(--color-success-bg); color: var(--color-success); }
+.status-pill.status-late { background: var(--color-danger-bg); color: var(--color-danger); }
 
 .attendance-times {
   display: grid;
@@ -449,7 +451,7 @@ select.input-success {
   margin-bottom: 20px;
 }
 
-.time-block { display: flex; flex-direction: column; gap: 4px; }
+.time-block { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 
 .time-label {
   font-size: 12px;

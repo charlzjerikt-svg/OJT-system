@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var originalText = button.textContent;
 
     button.disabled = true;
-    button.textContent = action === 'time_in' ? 'Timing in…' : 'Timing out…';
+    button.textContent = action === 'time_in' ? 'Recording Time In...' : 'Recording Time Out...';
     alertBox.style.display = 'none';
 
     var body = new URLSearchParams();
@@ -32,11 +32,12 @@ document.addEventListener('DOMContentLoaded', function () {
       .then(function (response) { return response.json(); })
       .then(function (data) {
         if (data.success) {
+          button.textContent = action === 'time_in' ? '✓ Time In Recorded' : '✓ Time Out Recorded';
           // The dashboard mixes several interdependent pieces (attendance card,
           // OJT progress stats, recent-attendance table) that all need to reflect
-          // the same fresh server state — a reload keeps the server as the single
-          // source of truth instead of hand-patching each piece of the DOM.
-          window.location.reload();
+          // the same fresh server state — a short reload keeps the server as the
+          // single source of truth instead of hand-patching each piece of the DOM.
+          window.setTimeout(function () { window.location.reload(); }, 500);
         } else {
           clicked = false;
           button.disabled = false;

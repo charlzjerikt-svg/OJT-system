@@ -95,7 +95,15 @@ function check_missing_time_out(int $userId): void {
 }
 
 /**
- * Result shape used by all four actions: ['ok' => bool, 'message'|'error' => string].
+ * Result shape used by all four actions: ['ok' => bool, 'code' => string, 'message'|'error' => string, ...].
+ * 'code' is a machine-readable reason (e.g. ALREADY_TIMED_IN) for callers that want to
+ * branch on it; 'error'/'message' are the safe, user-facing text.
+ *
+ * Time In is authenticated and authorized entirely from $userId, which callers must
+ * derive from the server-side session (see student/attendance_action.php) — never from
+ * client input. The timestamp is always server-generated (`new DateTime()`), never
+ * accepted from the caller, so a student can neither time in for someone else nor
+ * manipulate the recorded time/date.
  */
 function do_time_in(int $userId): array {
     global $pdo;
@@ -104,12 +112,21 @@ function do_time_in(int $userId): array {
     $stmt->execute([$userId]);
     $user = $stmt->fetch();
     if (!$user || $user['role'] !== 'student' || $user['status'] !== 'active') {
-        return ['ok' => false, 'error' => 'Your account is not eligible to record attendance.'];
+        return ['ok' => false, 'code' => 'FORBIDDEN', 'error' => 'Your account is not eligible to record attendance.'];
     }
 
     $now = new DateTime();
     if (!is_valid_working_day($userId, $now)) {
-        return ['ok' => false, 'error' => 'Today is your designated rest day. Time In is not available.'];
+        return ['ok' => false, 'code' => 'REST_DAY', 'error' => 'Today is your designated rest day. Time In is not available.'];
+    }
+
+    // Fast, friendly pre-check for an already-open session — including one from a prior
+    // day (e.g. an unclosed overnight shift), which the UNIQUE(user_id, attendance_date)
+    // constraint alone would NOT catch, since that new INSERT would target a different
+    // date. This is a UX nicety only; the constraint below (inside the transaction) is
+    // what actually guarantees no duplicate/overlapping row under concurrent requests.
+    if (get_open_attendance_row($userId)) {
+        return ['ok' => false, 'code' => 'ALREADY_ACTIVE', 'error' => 'You are already timed in.'];
     }
 
     check_missing_time_out($userId);
@@ -118,31 +135,49 @@ function do_time_in(int $userId): array {
     $cutoff->modify('+' . LATE_GRACE_MINUTES . ' minutes');
     $status = $now > $cutoff ? 'late' : 'present';
 
+    // Atomic: the row is only ever committed once the ojt_status transition has also
+    // succeeded, and the UNIQUE constraint makes the INSERT itself race-safe under
+    // concurrent requests (double-click, two tabs, simultaneous retries) — only one
+    // can ever win; every other caller lands in the catch below.
+    $pdo->beginTransaction();
     try {
         $stmt = $pdo->prepare(
             'INSERT INTO attendance (user_id, attendance_date, time_in, status) VALUES (?, ?, ?, ?)'
         );
         $stmt->execute([$userId, $now->format('Y-m-d'), $now->format('Y-m-d H:i:s'), $status]);
-    } catch (PDOException $e) {
-        if ($e->getCode() === '23000') {
-            return ['ok' => false, 'error' => 'You have already timed in today.'];
+
+        $profileStmt = $pdo->prepare('SELECT ojt_status FROM student_profiles WHERE user_id = ?');
+        $profileStmt->execute([$userId]);
+        if ($profileStmt->fetchColumn() === 'not_started') {
+            $pdo->prepare('UPDATE student_profiles SET ojt_status = ? WHERE user_id = ?')
+                ->execute(['ongoing', $userId]);
         }
-        throw $e;
+
+        $pdo->commit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        if ((int) $e->getCode() === 23000 || $e->getCode() === '23000') {
+            return ['ok' => false, 'code' => 'ALREADY_TIMED_IN', 'error' => 'You have already timed in today.'];
+        }
+        error_log('do_time_in failed: ' . $e->getMessage());
+        return ['ok' => false, 'code' => 'SERVER_ERROR', 'error' => 'Something went wrong recording your Time In. Please try again.'];
     }
 
-    $profileStmt = $pdo->prepare('SELECT ojt_status FROM student_profiles WHERE user_id = ?');
-    $profileStmt->execute([$userId]);
-    if ($profileStmt->fetchColumn() === 'not_started') {
-        $pdo->prepare('UPDATE student_profiles SET ojt_status = ? WHERE user_id = ?')
-            ->execute(['ongoing', $userId]);
-    }
-
+    // Best-effort side effects, deliberately outside the transaction: a notification
+    // insert failing here must never roll back an already-committed, legitimate Time In.
     notify_user($userId, 'time_in', 'Time In Recorded', 'Your Time In was recorded at ' . $now->format('g:i:s A') . '.');
     if ($status === 'late') {
         notify_user($userId, 'late', 'Late Time In', 'Your Time In today was marked Late.');
     }
 
-    return ['ok' => true, 'message' => 'Time In recorded at ' . $now->format('g:i:s A') . '.'];
+    return [
+        'ok' => true,
+        'code' => 'OK',
+        'message' => 'Time In recorded at ' . $now->format('g:i:s A') . '.',
+        'attendance_date' => $now->format('Y-m-d'),
+        'time_in' => $now->format('g:i:s A'),
+        'status' => $status,
+    ];
 }
 
 function do_start_break(int $userId): array {

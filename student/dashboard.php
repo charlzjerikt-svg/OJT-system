@@ -43,6 +43,13 @@ function fmt_time(?string $datetime): string {
     return $datetime ? date('g:i A', strtotime($datetime)) : '--';
 }
 
+function fmt_time_precise(?string $datetime): string {
+    return $datetime ? date('g:i:s A', strtotime($datetime)) : '--';
+}
+
+$punctualityLabels = ['present' => 'Present', 'late' => 'Late'];
+$punctuality = $today['status'] ?? null;
+
 $pageTitle = 'Student Dashboard';
 $extraScripts = [APP_URL . '/assets/js/dashboard.js'];
 include __DIR__ . '/../includes/partials/header.php';
@@ -68,7 +75,10 @@ include __DIR__ . '/../includes/partials/header.php';
   <div class="attendance-times">
     <div class="time-block">
       <span class="time-label">Time In</span>
-      <span class="time-value" id="timeInValue"><?= fmt_time($today['time_in'] ?? null) ?></span>
+      <span class="time-value" id="timeInValue"><?= fmt_time_precise($today['time_in'] ?? null) ?></span>
+      <?php if ($punctuality): ?>
+        <span class="status-pill status-<?= e($punctuality) ?>" id="punctualityPill"><?= e($punctualityLabels[$punctuality] ?? ucfirst($punctuality)) ?></span>
+      <?php endif; ?>
     </div>
     <div class="time-block">
       <span class="time-label">Time Out</span>
