@@ -4,9 +4,9 @@ A web-based On-the-Job Training (OJT) management system for tracking student att
 progress, and OJT program administration. Built as a plain PHP + MySQL app (PDO, no framework)
 intended to run on XAMPP.
 
-**Current scope:** authentication (login/logout, password reset, change password) and
-**student self-registration**. Attendance, time in/out, admin approval UI, and notifications
-are scaffolded (dashboard "coming soon" tiles) but not yet implemented.
+**Current scope:** secure login/logout with role-based dashboards, "remember me", forgot/reset
+password, and **student self-registration**. Attendance, time in/out, admin approval UI, and
+notifications are scaffolded (dashboard "coming soon" tiles) but not yet implemented.
 
 ## Requirements
 
@@ -41,6 +41,7 @@ Run the SQL files in order against MySQL (via phpMyAdmin, or the CLI):
 "C:\xampp\mysql\bin\mysql.exe" -u root < database/schema.sql
 "C:\xampp\mysql\bin\mysql.exe" -u root < database/migration_002_student_module.sql
 "C:\xampp\mysql\bin\mysql.exe" -u root < database/migration_003_registration.sql
+"C:\xampp\mysql\bin\mysql.exe" -u root < database/migration_004_login.sql
 ```
 
 - `schema.sql` creates the database and the `users`, `password_resets`, and `auth_attempts` tables.
@@ -48,8 +49,11 @@ Run the SQL files in order against MySQL (via phpMyAdmin, or the CLI):
   `announcements`, `announcement_reads`, and `notifications` (additive, no changes to existing tables).
 - `migration_003_registration.sql` widens `users.status` to add `pending`/`rejected` (for
   self-registration + future admin approval) and `auth_attempts.action` to add `register`
-  (so registration reuses the existing rate limiter). Both are additive `ALTER`s — no data loss,
-  and every existing row keeps working exactly as before.
+  (so registration reuses the existing rate limiter).
+- `migration_004_login.sql` adds `remember_tokens` (secure "Remember Me" persistent login).
+
+All three migrations are additive `ALTER`s/`CREATE TABLE IF NOT EXISTS` — no data loss, and every
+existing row keeps working exactly as before.
 
 Optionally seed two test accounts (admin + student, both `active`) for exercising the existing
 login flow:
@@ -113,6 +117,64 @@ Students register at **`/auth/register.php`** (linked from the login page as "Re
 }
 ```
 
+## Login & Authentication module usage
+
+Students and admins both log in at **`/auth/login.php`** with either their **email or Student
+ID** plus password.
+
+- **Role-based redirect**: `student` → `/student/dashboard.php`, `admin` → `/admin/dashboard.php`.
+  This decision is made server-side (`auth/login.php`, then re-verified by `require_role()` on
+  every protected page) — never trust a frontend redirect for authorization.
+- **Account status gates login**, checked only *after* the password has already been verified
+  (so a wrong password never reveals whether — or in what state — an account exists):
+  | Status | Result |
+  |---|---|
+  | `active` | Logs in normally |
+  | `pending` | "Your account is still pending admin approval..." |
+  | `inactive` | "Your account is currently inactive..." |
+  | `rejected` | "Your registration has been rejected..." |
+- **Route protection**: `require_login()` and `require_role('admin' \| 'student')` in
+  `includes/auth.php` are this project's `requireLogin()`/`requireRole()` — every dashboard
+  already calls them, so a student can never reach `/admin/dashboard.php` by editing the URL
+  (verified — returns `403`).
+- **Session security**: `session_regenerate_id(true)` on every login (prevents fixation),
+  `httponly`/`SameSite=Lax` cookies, `secure` cookies once `APP_ENV` is `production`. Sessions
+  store `user_id`, `role`, and `authenticated` — but authorization always re-reads the *live*
+  role/status from the database on each request (`current_user()`), never trusting the session
+  values alone, so a role/status change (or admin deactivating someone) takes effect immediately
+  even on an already-open session.
+- **"Remember Me"**: uses a selector/validator token pair (`remember_tokens` table +
+  `REMEMBER_COOKIE_NAME` cookie), *not* a raw session ID or user ID in a cookie. See
+  [Security notes](#security-notes) for the full rationale. Configurable via `REMEMBER_ME_DAYS`.
+- **Brute-force protection**: reuses the existing `auth_attempts` table/`too_many_attempts()`
+  helper — configurable via `MAX_LOGIN_ATTEMPTS`, `MAX_LOGIN_ATTEMPTS_PER_IP`, and
+  `LOGIN_LOCKOUT_MINUTES` in `config.php` (defaults: 5 / 20 / 15). Failed-attempt counters reset
+  automatically once a login succeeds (attempts are only ever counted, not stored as a running
+  "lock" — a normal account is never permanently locked).
+- **Forgot/Reset Password** (`/auth/forgot_password.php`, `/auth/reset_password.php`) — already
+  built prior to this module and reused as-is: cryptographically random single-use tokens
+  (`password_resets` table, SHA-256 hash stored, 45-minute expiry), a generic "if an account
+  exists..." response regardless of whether the email is registered, and a password reset now
+  also **revokes every remember-me token** for that user. See **Password reset configuration**
+  below for the SMTP setup this flow needs to actually deliver email.
+- **Logout** (`/auth/logout.php`): destroys the session server-side, clears the session cookie,
+  and revokes this device's remember-me token — an old session ID or cookie is provably unusable
+  afterward (verified: replaying the previous session ID after logout redirects to login, not
+  the dashboard).
+
+### Password reset configuration
+
+`includes/mailer.php` sends reset emails through PHPMailer/SMTP using the `SMTP_*` constants in
+`config/config.php` — nothing is hardcoded. Until you fill in real SMTP credentials there
+(`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `FROM_EMAIL`), the reset token is
+still generated and stored correctly, but the email itself won't send (the failure is caught and
+logged via `error_log`, never shown to the user — the UI always shows the same generic success
+message either way). For local testing without real SMTP, either point `SMTP_HOST`/`SMTP_PORT`
+at a mail-catching relay (e.g. Mailtrap, Mailhog), or skip email entirely and drive the flow
+directly: generate a random token, `hash('sha256', $token)` it, `INSERT` that hash into
+`password_resets` for the target `user_id`, then visit
+`/auth/reset_password.php?token=<the-unhashed-token>`.
+
 ## Security notes
 
 - **Passwords** are hashed with `password_hash()` (bcrypt via `PASSWORD_DEFAULT`) and verified
@@ -142,6 +204,22 @@ Students register at **`/auth/register.php`** (linked from the login page as "Re
   generic "something went wrong" message.
 - No secrets are committed: `config/config.php` is gitignored, and `config.example.php` ships
   with placeholder values only.
+- **"Remember Me" tokens** (`remember_tokens`) use the selector/validator pattern (Barry Jaspan's
+  "Improved Persistent Login Cookie Best Practice"): the cookie is `selector:validator`, where
+  `selector` is an indexed, non-secret DB lookup key and `validator` is the actual secret — only
+  its SHA-256 hash is ever stored, compared with `hash_equals()`. Never a raw session ID or user
+  ID in a cookie, and never the password. Tokens are single-use and rotated on every successful
+  auto-login, revoked entirely on logout, and revoked for *every* device on password change/reset.
+  A selector that resolves but whose validator doesn't match (a strong signal of a stolen/tampered
+  cookie) revokes every remaining token for that user as a precaution, not just the one presented.
+- **Session fixation**: `session_regenerate_id(true)` runs on every login (including a "remember
+  me" auto-login) — verified: the session ID always changes across the login boundary, and an old
+  (pre-login) session ID is rejected afterward.
+- **Login brute-force protection**: reuses `auth_attempts`/`too_many_attempts()` (the same
+  mechanism already protecting registration and password-reset requests), keyed on both the
+  submitted identifier and the requesting IP, over a configurable rolling window
+  (`MAX_LOGIN_ATTEMPTS`, `MAX_LOGIN_ATTEMPTS_PER_IP`, `LOGIN_LOCKOUT_MINUTES`). The lockout is
+  temporary and time-based — no account is ever permanently disabled by normal failed attempts.
 
 ## Git/GitHub workflow
 
@@ -150,7 +228,7 @@ Standard flow — this repo already has `config/config.php` and `uploads/profile
 ```bash
 git status
 git add .
-git commit -m "feat: implement student registration"
+git commit -m "feat: implement secure authentication"
 git push origin main
 ```
 

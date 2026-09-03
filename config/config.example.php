@@ -18,6 +18,15 @@ define('WORKDAY_START_TIME', '08:00:00');
 define('LATE_GRACE_MINUTES', 15);
 define('STANDARD_SHIFT_MINUTES', 480); // 8 hours
 
+// Login brute-force protection (see includes/rate_limit.php)
+define('MAX_LOGIN_ATTEMPTS', 5);         // failed attempts for one identifier (email/username/student ID)...
+define('MAX_LOGIN_ATTEMPTS_PER_IP', 20); // ...or from one IP address...
+define('LOGIN_LOCKOUT_MINUTES', 15);     // ...within this rolling window, before login is blocked.
+
+// "Remember me" persistent login
+define('REMEMBER_COOKIE_NAME', 'ojt_remember');
+define('REMEMBER_ME_DAYS', 30);
+
 // Database
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'ojt_system_db');

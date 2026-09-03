@@ -54,6 +54,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare('UPDATE password_resets SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL')
                     ->execute([$reset['user_id']]);
 
+                $pdo->prepare('DELETE FROM remember_tokens WHERE user_id = ?')
+                    ->execute([$reset['user_id']]);
+
                 $pdo->commit();
                 $success = true;
             } catch (Throwable $e) {

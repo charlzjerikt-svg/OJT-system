@@ -18,9 +18,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ip = client_ip();
 
     if ($identifier === '' || $password === '') {
-        $errors[] = 'Please enter both your email/username and password.';
-    } elseif (too_many_attempts($identifier, $ip, 'login', 5, 20, 15)) {
-        $errors[] = 'Too many failed attempts. Please wait 15 minutes and try again.';
+        $errors[] = 'Please enter both your email/student ID and password.';
+    } elseif (too_many_attempts($identifier, $ip, 'login', MAX_LOGIN_ATTEMPTS, MAX_LOGIN_ATTEMPTS_PER_IP, LOGIN_LOCKOUT_MINUTES)) {
+        $errors[] = 'Too many failed attempts. Please wait ' . LOGIN_LOCKOUT_MINUTES . ' minutes and try again.';
     } else {
         $result = attempt_login($identifier, $password);
 
@@ -29,9 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             login_user($result['user']);
 
             if ($remember) {
-                // Extend the session cookie lifetime beyond the browser session.
-                $params = session_get_cookie_params();
-                setcookie(session_name(), session_id(), time() + (30 * 24 * 60 * 60), $params['path'], $params['domain'], $params['secure'], $params['httponly']);
+                issue_remember_token($result['user']['id']);
             }
 
             redirect($result['user']['role'] === 'admin' ? '/admin/dashboard.php' : '/student/dashboard.php');
@@ -43,10 +41,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pageTitle = 'Login';
+$extraScripts = [APP_URL . '/assets/js/login.js'];
 include __DIR__ . '/../includes/partials/header.php';
 ?>
 <div class="card">
-  <h1>Welcome back</h1>
+  <h1>Welcome Back!</h1>
   <p class="subtitle">Sign in to your OJT-system account.</p>
 
   <?php if ($errors): ?>
@@ -55,10 +54,10 @@ include __DIR__ . '/../includes/partials/header.php';
     </div>
   <?php endif; ?>
 
-  <form method="post" action="">
+  <form method="post" action="" id="loginForm">
     <?= csrf_field() ?>
     <div class="form-group">
-      <label for="identifier">Email or Username</label>
+      <label for="identifier">Email / Student ID</label>
       <input type="text" id="identifier" name="identifier" value="<?= e($identifier) ?>" autocomplete="username" required autofocus>
     </div>
     <div class="form-group">
@@ -70,14 +69,14 @@ include __DIR__ . '/../includes/partials/header.php';
     </div>
     <div class="form-group checkbox-row">
       <input type="checkbox" id="remember" name="remember" value="1">
-      <label for="remember" style="margin:0;font-weight:400;">Remember me</label>
+      <label for="remember" style="margin:0;font-weight:400;">Remember Me</label>
     </div>
-    <button type="submit" class="btn">Log In</button>
+    <button type="submit" class="btn" id="loginSubmit">Log In</button>
   </form>
 
   <div class="form-footer">
-    <a href="<?= APP_URL ?>/auth/forgot_password.php">Forgot password?</a>
-    <a href="<?= APP_URL ?>/auth/register.php">Register as student</a>
+    <a href="<?= APP_URL ?>/auth/forgot_password.php">Forgot Password?</a>
+    <a href="<?= APP_URL ?>/auth/register.php">Don't have an account? Register here</a>
   </div>
 </div>
 <?php include __DIR__ . '/../includes/partials/footer.php'; ?>

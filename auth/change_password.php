@@ -42,6 +42,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $freshStmt = $pdo->prepare('SELECT password_changed_at FROM users WHERE id = ?');
         $freshStmt->execute([$user['id']]);
         $_SESSION['pwd_changed_snapshot'] = strtotime($freshStmt->fetchColumn());
+        revoke_all_remember_tokens($user['id']);
         $success = true;
     }
 }
