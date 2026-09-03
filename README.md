@@ -5,8 +5,9 @@ progress, and OJT program administration. Built as a plain PHP + MySQL app (PDO,
 intended to run on XAMPP.
 
 **Current scope:** secure login/logout with role-based dashboards, "remember me", forgot/reset
-password, and **student self-registration**. Attendance, time in/out, admin approval UI, and
-notifications are scaffolded (dashboard "coming soon" tiles) but not yet implemented.
+password, **student self-registration**, and the **Student Dashboard** (Time In/Time Out, OJT
+progress, attendance history — no break tracking in this version). Admin approval UI, attendance
+corrections, notifications (inbox/UI), and announcements are not yet implemented.
 
 ## Requirements
 
@@ -175,6 +176,33 @@ directly: generate a random token, `hash('sha256', $token)` it, `INSERT` that ha
 `password_resets` for the target `user_id`, then visit
 `/auth/reset_password.php?token=<the-unhashed-token>`.
 
+## Student Dashboard usage
+
+After login, a student lands on **`/student/dashboard.php`**: their info (name, Student ID,
+course, year level, company, OJT status), a Today's Attendance card with a Time In/Time Out
+button, live OJT progress (required/completed/remaining hours + a percent bar), and a recent
+attendance table linking to **`/student/attendance_history.php`** for the full record.
+
+- **Time In/Time Out** post to `student/attendance_action.php`, which calls `do_time_in()` /
+  `do_time_out()` in `includes/attendance.php` — these already existed (written before this
+  task) and are reused as-is rather than reimplemented. Every timestamp is `new DateTime()` on
+  the server; the client never sends one.
+- **No break tracking**: `break_start`/`break_end` columns and `do_start_break()`/`do_end_break()`
+  already existed in the schema/codebase for a future module, but nothing on the dashboard calls
+  them — they simply stay `NULL`, which makes the existing hours math reduce to exactly
+  `Time Out − Time In` with nothing to subtract.
+- **Duplicate Time In/Out** is prevented at the database level: `attendance` has a
+  `UNIQUE (user_id, attendance_date)` constraint, and the Time Out `UPDATE` is a single
+  conditional statement (`WHERE time_out IS NULL ...`), so even concurrent double-clicks can only
+  ever produce one row/one recorded time — verified under 5 simultaneous requests.
+- **Ownership**: every query is scoped to the authenticated student's own `user_id` from the
+  session (`require_role('student')`) — there is no `?id=`/`?user_id=` parameter anywhere in this
+  module for one student to reach another's records.
+- `includes/notifications.php` was added as a small, UI-less data-layer function
+  (`notify_user()`) purely because `includes/attendance.php`'s existing, already-correct
+  `do_time_in()`/`do_time_out()` call it and the file didn't exist yet — it is not a Notifications
+  module/inbox, which remains out of scope.
+
 ## Security notes
 
 - **Passwords** are hashed with `password_hash()` (bcrypt via `PASSWORD_DEFAULT`) and verified
@@ -228,7 +256,7 @@ Standard flow — this repo already has `config/config.php` and `uploads/profile
 ```bash
 git status
 git add .
-git commit -m "feat: implement secure authentication"
+git commit -m "feat: implement student dashboard"
 git push origin main
 ```
 

@@ -130,6 +130,13 @@ function do_time_in(int $userId): array {
         throw $e;
     }
 
+    $profileStmt = $pdo->prepare('SELECT ojt_status FROM student_profiles WHERE user_id = ?');
+    $profileStmt->execute([$userId]);
+    if ($profileStmt->fetchColumn() === 'not_started') {
+        $pdo->prepare('UPDATE student_profiles SET ojt_status = ? WHERE user_id = ?')
+            ->execute(['ongoing', $userId]);
+    }
+
     notify_user($userId, 'time_in', 'Time In Recorded', 'Your Time In was recorded at ' . $now->format('g:i:s A') . '.');
     if ($status === 'late') {
         notify_user($userId, 'late', 'Late Time In', 'Your Time In today was marked Late.');
