@@ -2,6 +2,100 @@
 require_once __DIR__ . '/attendance.php';
 require_once __DIR__ . '/mailer.php';
 
+const SCHEDULE_DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * The student's full week of expected schedule (one entry per day 0-6), each
+ * merged the same way get_effective_schedule() merges a single day — an explicit
+ * ojt_schedules row where the admin has set one, else the app-wide default.
+ * Used to pre-fill the admin schedule-editing form.
+ */
+function get_student_schedule_week(int $userId): array {
+    $week = [];
+    $today = new DateTime();
+    for ($dow = 0; $dow <= 6; $dow++) {
+        // Walk to the next date that actually falls on $dow so get_effective_schedule()
+        // (which takes a DateTime and derives day-of-week from it) is reused as-is
+        // rather than duplicating its lookup logic here.
+        $date = (clone $today)->modify('+' . (($dow - (int) $today->format('w') + 7) % 7) . ' days');
+        $week[$dow] = get_effective_schedule($userId, $date);
+    }
+    return $week;
+}
+
+/**
+ * Upserts all 7 days of a student's schedule in one transaction. Each day is
+ * validated server-side (end after start, break within start-end if given) —
+ * never trusts the form to have already enforced this. $days is keyed 0-6,
+ * each value ['is_active'=>bool,'start_time'=>'HH:MM','end_time'=>...,
+ * 'break_start'=>?'HH:MM','break_end'=>?'HH:MM'].
+ */
+function save_student_schedule(int $adminId, int $studentId, array $days): array {
+    global $pdo;
+
+    $stmt = $pdo->prepare("SELECT id FROM users WHERE id = ? AND role = 'student'");
+    $stmt->execute([$studentId]);
+    if (!$stmt->fetchColumn()) {
+        return ['ok' => false, 'error' => 'Student not found.'];
+    }
+
+    foreach ($days as $dow => $day) {
+        $dow = (int) $dow;
+        if ($dow < 0 || $dow > 6) {
+            return ['ok' => false, 'error' => 'Invalid day of week.'];
+        }
+        if (empty($day['is_active'])) {
+            continue; // day off — no time validation needed
+        }
+        if (empty($day['start_time']) || empty($day['end_time'])) {
+            return ['ok' => false, 'error' => SCHEDULE_DAY_LABELS[$dow] . ': start and end time are required for a working day.'];
+        }
+        if ($day['start_time'] >= $day['end_time']) {
+            return ['ok' => false, 'error' => SCHEDULE_DAY_LABELS[$dow] . ': end time must be after start time.'];
+        }
+        if (!empty($day['break_start']) && !empty($day['break_end'])) {
+            if ($day['break_start'] >= $day['break_end']) {
+                return ['ok' => false, 'error' => SCHEDULE_DAY_LABELS[$dow] . ': break end must be after break start.'];
+            }
+            if ($day['break_start'] < $day['start_time'] || $day['break_end'] > $day['end_time']) {
+                return ['ok' => false, 'error' => SCHEDULE_DAY_LABELS[$dow] . ': break must fall within the working hours.'];
+            }
+        }
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare(
+            'INSERT INTO ojt_schedules (user_id, day_of_week, start_time, end_time, break_start, break_end, is_active)
+             VALUES (:user_id, :dow, :start, :end, :break_start, :break_end, :is_active)
+             ON DUPLICATE KEY UPDATE
+               start_time = VALUES(start_time), end_time = VALUES(end_time),
+               break_start = VALUES(break_start), break_end = VALUES(break_end),
+               is_active = VALUES(is_active)'
+        );
+        foreach ($days as $dow => $day) {
+            $isActive = !empty($day['is_active']);
+            $stmt->execute([
+                'user_id' => $studentId,
+                'dow' => (int) $dow,
+                'start' => $isActive ? $day['start_time'] : ($day['start_time'] ?: WORKDAY_START_TIME),
+                'end' => $isActive ? $day['end_time'] : ($day['end_time'] ?: WORKDAY_END_TIME),
+                'break_start' => $day['break_start'] ?: null,
+                'break_end' => $day['break_end'] ?: null,
+                'is_active' => $isActive ? 1 : 0,
+            ]);
+        }
+        $pdo->commit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        error_log('save_student_schedule failed: ' . $e->getMessage());
+        return ['ok' => false, 'error' => 'Something went wrong saving the schedule. Please try again.'];
+    }
+
+    log_admin_action($adminId, 'update_schedule', $studentId, null, $days, null);
+    return ['ok' => true];
+}
+
 /**
  * Live dashboard KPIs. Everything here is computed fresh from `users`/`attendance`/
  * `student_profiles` on every call — nothing is cached or stored, so these numbers
@@ -237,7 +331,7 @@ function get_admin_attendance_list(array $filters): array {
     $offset = ($page - 1) * $perPage;
 
     $stmt = $pdo->prepare(
-        "SELECT a.id, a.user_id, a.attendance_date, a.time_in, a.time_out, a.status, a.source, a.break_start, a.break_end,
+        "SELECT a.id, a.user_id, a.attendance_date, a.time_in, a.time_out, a.status, a.source,
                 u.full_name, u.student_id
          {$baseFrom}
          ORDER BY a.attendance_date DESC, u.full_name ASC

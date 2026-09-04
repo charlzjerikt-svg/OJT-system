@@ -174,7 +174,7 @@ include __DIR__ . '/../includes/partials/header.php';
   <div class="table-scroll">
     <table class="data-table">
       <thead>
-        <tr><th>Date</th><th>Time In</th><th>Time Out</th><th>Worked</th><th>Status</th></tr>
+        <tr><th>Date</th><th>Time In</th><th>Break</th><th>Time Out</th><th>Worked</th><th>Status</th></tr>
       </thead>
       <tbody>
         <?php foreach ($history['rows'] as $row): ?>
@@ -182,10 +182,12 @@ include __DIR__ . '/../includes/partials/header.php';
           $incomplete = !$row['time_out'];
           $statusKey = $incomplete ? 'incomplete' : $row['status'];
           $statusLabel = $incomplete ? 'Incomplete' : ucfirst($row['status']);
+          $breakMin = calculate_break_minutes_for_attendance((int) $row['id']);
         ?>
         <tr>
           <td><?= e(date('M j, Y', strtotime($row['attendance_date']))) ?></td>
           <td><?= fmt_time($row['time_in']) ?></td>
+          <td><?= $breakMin > 0 ? e(format_minutes($breakMin)) : '--' ?></td>
           <td><?= fmt_time($row['time_out']) ?></td>
           <td><?= $incomplete ? 'In Progress' : e(format_minutes(calculate_worked_minutes($row, false))) ?></td>
           <td><span class="status-pill status-<?= e($statusKey) ?>"><?= e($statusLabel) ?></span></td>

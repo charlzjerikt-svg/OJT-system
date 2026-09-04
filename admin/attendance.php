@@ -122,13 +122,14 @@ include __DIR__ . '/../includes/partials/header.php';
   <?php else: ?>
   <div class="table-scroll">
     <table class="data-table">
-      <thead><tr><th>Student</th><th>Date</th><th>Time In</th><th>Time Out</th><th>Worked</th><th>Status</th><th>Source</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Student</th><th>Date</th><th>Time In</th><th>Break</th><th>Time Out</th><th>Worked</th><th>Status</th><th>Source</th><th>Actions</th></tr></thead>
       <tbody>
-        <?php foreach ($list['rows'] as $row): $incomplete = !$row['time_out']; ?>
+        <?php foreach ($list['rows'] as $row): $incomplete = !$row['time_out']; $breakMin = calculate_break_minutes_for_attendance((int) $row['id']); ?>
         <tr>
           <td><a href="<?= APP_URL ?>/admin/student_profile.php?id=<?= (int) $row['user_id'] ?>"><?= e($row['full_name']) ?></a><br><span class="field-hint" style="margin:0;"><?= e($row['student_id'] ?? '') ?></span></td>
           <td><?= e(date('M j, Y', strtotime($row['attendance_date']))) ?></td>
           <td><?= fmt_time_admin2($row['time_in']) ?></td>
+          <td><?= $breakMin > 0 ? e(format_minutes($breakMin)) : '--' ?></td>
           <td><?= fmt_time_admin2($row['time_out']) ?></td>
           <td><?= $incomplete ? 'In Progress' : e(format_minutes(calculate_worked_minutes($row, false))) ?></td>
           <td><span class="status-pill status-<?= $incomplete ? 'incomplete' : e($row['status']) ?>"><?= $incomplete ? 'Incomplete' : e(ucfirst($row['status'])) ?></span></td>

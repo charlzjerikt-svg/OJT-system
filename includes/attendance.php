@@ -44,8 +44,23 @@ function get_open_attendance_row(int $userId): ?array {
     return $row ?: null;
 }
 
+/**
+ * A day is invalid for attendance if an explicit per-day ojt_schedules row marks
+ * it inactive (admin-assigned day off — this always wins when present), or, absent
+ * an explicit schedule for that day, if it matches the legacy single rest_day field
+ * on student_profiles (kept for backward compatibility with existing profiles).
+ */
 function is_valid_working_day(int $userId, DateTime $date): bool {
     global $pdo;
+    $dow = (int) $date->format('w');
+
+    $stmt = $pdo->prepare('SELECT is_active FROM ojt_schedules WHERE user_id = ? AND day_of_week = ?');
+    $stmt->execute([$userId, $dow]);
+    $isActive = $stmt->fetchColumn();
+    if ($isActive !== false) {
+        return (bool) $isActive;
+    }
+
     $stmt = $pdo->prepare('SELECT rest_day FROM student_profiles WHERE user_id = ?');
     $stmt->execute([$userId]);
     $restDay = $stmt->fetchColumn();
@@ -54,7 +69,46 @@ function is_valid_working_day(int $userId, DateTime $date): bool {
         return true; // no fixed rest day configured — every day is valid
     }
 
-    return (int) $date->format('w') !== (int) $restDay;
+    return $dow !== (int) $restDay;
+}
+
+/**
+ * The student's expected schedule for $date — an explicit per-day ojt_schedules
+ * row if the admin set one, else the app-wide defaults from config.php. This is
+ * what the student is EXPECTED to follow; it must never be confused with or
+ * overwritten by actual recorded attendance, which lives entirely in
+ * attendance/breaks.
+ */
+function get_effective_schedule(int $userId, DateTime $date): array {
+    global $pdo;
+    $dow = (int) $date->format('w');
+
+    $stmt = $pdo->prepare(
+        'SELECT start_time, end_time, break_start, break_end, is_active
+         FROM ojt_schedules WHERE user_id = ? AND day_of_week = ?'
+    );
+    $stmt->execute([$userId, $dow]);
+    $row = $stmt->fetch();
+
+    if ($row) {
+        return [
+            'start_time' => $row['start_time'],
+            'end_time' => $row['end_time'],
+            'break_start' => $row['break_start'],
+            'break_end' => $row['break_end'],
+            'is_active' => (bool) $row['is_active'],
+            'source' => 'custom',
+        ];
+    }
+
+    return [
+        'start_time' => WORKDAY_START_TIME,
+        'end_time' => WORKDAY_END_TIME,
+        'break_start' => DEFAULT_BREAK_START,
+        'break_end' => DEFAULT_BREAK_END,
+        'is_active' => true,
+        'source' => 'default',
+    ];
 }
 
 /**
@@ -94,6 +148,37 @@ function check_missing_time_out(int $userId): void {
     );
 }
 
+/** The currently open (unended) break for one attendance row, if any. */
+function get_active_break(int $attendanceId): ?array {
+    global $pdo;
+    $stmt = $pdo->prepare('SELECT * FROM breaks WHERE attendance_id = ? AND break_end IS NULL LIMIT 1');
+    $stmt->execute([$attendanceId]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+/** All breaks (completed and, if any, active) for one attendance row, oldest first. */
+function get_breaks_for_attendance(int $attendanceId): array {
+    global $pdo;
+    $stmt = $pdo->prepare('SELECT * FROM breaks WHERE attendance_id = ? ORDER BY break_start ASC');
+    $stmt->execute([$attendanceId]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Total break seconds for one attendance row. Only completed breaks
+ * (break_end IS NOT NULL) count toward worked-hours deductions — an in-progress
+ * break's "so far" duration is never subtracted from worked time until it ends.
+ */
+function sum_break_seconds(int $attendanceId): int {
+    global $pdo;
+    $stmt = $pdo->prepare(
+        'SELECT COALESCE(SUM(duration_seconds), 0) FROM breaks WHERE attendance_id = ? AND break_end IS NOT NULL'
+    );
+    $stmt->execute([$attendanceId]);
+    return (int) $stmt->fetchColumn();
+}
+
 /**
  * Result shape used by all four actions: ['ok' => bool, 'code' => string, 'message'|'error' => string, ...].
  * 'code' is a machine-readable reason (e.g. ALREADY_TIMED_IN) for callers that want to
@@ -131,7 +216,11 @@ function do_time_in(int $userId): array {
 
     check_missing_time_out($userId);
 
-    $cutoff = new DateTime(date('Y-m-d') . ' ' . WORKDAY_START_TIME);
+    // Late/present is judged against THIS student's expected schedule for today
+    // (an admin-assigned override, or the app-wide default) — never a single
+    // hardcoded cutoff, since different students/companies can have different hours.
+    $schedule = get_effective_schedule($userId, $now);
+    $cutoff = new DateTime($now->format('Y-m-d') . ' ' . $schedule['start_time']);
     $cutoff->modify('+' . LATE_GRACE_MINUTES . ' minutes');
     $status = $now > $cutoff ? 'late' : 'present';
 
@@ -180,57 +269,86 @@ function do_time_in(int $userId): array {
     ];
 }
 
+/**
+ * Starts a new break for the student's currently open attendance row. Supports
+ * multiple breaks per day (a new row is inserted each time, not a single
+ * fixed pair of columns). Race-safe via breaks.uq_breaks_one_active (see
+ * migration_007_schedule_and_breaks.sql): two concurrent Start Break requests
+ * can only ever have one succeed — the loser hits the constraint below.
+ */
 function do_start_break(int $userId): array {
     global $pdo;
     $now = new DateTime();
 
-    $stmt = $pdo->prepare(
-        'UPDATE attendance SET break_start = ?
-         WHERE user_id = ? AND time_out IS NULL AND time_in IS NOT NULL AND break_start IS NULL'
-    );
-    $stmt->execute([$now->format('Y-m-d H:i:s'), $userId]);
+    $openRow = get_open_attendance_row($userId);
+    if (!$openRow || !$openRow['time_in']) {
+        return ['ok' => false, 'code' => 'NO_ACTIVE_SESSION', 'error' => 'You must Time In before starting a break.'];
+    }
 
-    if ($stmt->rowCount() === 0) {
-        $row = get_today_attendance($userId);
-        if (!$row || !$row['time_in']) {
-            return ['ok' => false, 'error' => 'You must Time In before starting a break.'];
+    if (get_active_break((int) $openRow['id'])) {
+        return ['ok' => false, 'code' => 'ALREADY_ON_BREAK', 'error' => 'A break is already in progress.'];
+    }
+
+    try {
+        $pdo->prepare('INSERT INTO breaks (attendance_id, break_start) VALUES (?, ?)')
+            ->execute([$openRow['id'], $now->format('Y-m-d H:i:s')]);
+    } catch (PDOException $e) {
+        if ((int) $e->getCode() === 23000 || $e->getCode() === '23000') {
+            return ['ok' => false, 'code' => 'ALREADY_ON_BREAK', 'error' => 'A break is already in progress.'];
         }
-        if ($row['time_out']) {
-            return ['ok' => false, 'error' => 'You have already timed out; breaks are no longer available.'];
-        }
-        return ['ok' => false, 'error' => 'A break is already in progress.'];
+        error_log('do_start_break failed: ' . $e->getMessage());
+        return ['ok' => false, 'code' => 'SERVER_ERROR', 'error' => 'Something went wrong starting your break. Please try again.'];
     }
 
     notify_user($userId, 'break_start', 'Break Started', 'Your break started at ' . $now->format('g:i A') . '.');
-    return ['ok' => true, 'message' => 'Break started at ' . $now->format('g:i A') . '.'];
+
+    return [
+        'ok' => true,
+        'code' => 'OK',
+        'message' => 'Break started at ' . $now->format('g:i A') . '.',
+        'break_start' => $now->format('g:i:s A'),
+    ];
 }
 
+/**
+ * Ends the student's currently active break. Atomic via the same
+ * "UPDATE ... WHERE ... AND break_end IS NULL, then check rowCount()" pattern
+ * used by do_time_out() — row-level locking makes this race-safe under a
+ * double-click or two tabs.
+ */
 function do_end_break(int $userId): array {
     global $pdo;
     $now = new DateTime();
 
-    $stmt = $pdo->prepare(
-        'UPDATE attendance SET break_end = ?
-         WHERE user_id = ? AND time_out IS NULL AND break_start IS NOT NULL AND break_end IS NULL'
-    );
-    $stmt->execute([$now->format('Y-m-d H:i:s'), $userId]);
-
-    if ($stmt->rowCount() === 0) {
-        $row = get_today_attendance($userId);
-        if (!$row || !$row['break_start']) {
-            return ['ok' => false, 'error' => 'No active break to end.'];
-        }
-        return ['ok' => false, 'error' => 'Break has already ended.'];
+    $openRow = get_open_attendance_row($userId);
+    if (!$openRow) {
+        return ['ok' => false, 'code' => 'NO_ACTIVE_SESSION', 'error' => 'You have not timed in today.'];
     }
 
-    $row = get_today_attendance($userId);
-    $breakMinutes = (int) round((strtotime($row['break_end']) - strtotime($row['break_start'])) / 60);
-    $h = intdiv($breakMinutes, 60);
-    $m = $breakMinutes % 60;
-    $duration = ($h > 0 ? "{$h}h " : '') . "{$m}m";
+    $activeBreak = get_active_break((int) $openRow['id']);
+    if (!$activeBreak) {
+        return ['ok' => false, 'code' => 'NO_ACTIVE_BREAK', 'error' => 'No active break to end.'];
+    }
 
+    $durationSeconds = max(0, $now->getTimestamp() - strtotime($activeBreak['break_start']));
+
+    $stmt = $pdo->prepare('UPDATE breaks SET break_end = ?, duration_seconds = ? WHERE id = ? AND break_end IS NULL');
+    $stmt->execute([$now->format('Y-m-d H:i:s'), $durationSeconds, $activeBreak['id']]);
+
+    if ($stmt->rowCount() === 0) {
+        return ['ok' => false, 'code' => 'NO_ACTIVE_BREAK', 'error' => 'Break has already ended.'];
+    }
+
+    $duration = format_minutes((int) round($durationSeconds / 60));
     notify_user($userId, 'break_end', 'Break Ended', 'Your break ended at ' . $now->format('g:i A') . " (duration {$duration}).");
-    return ['ok' => true, 'message' => 'Break ended at ' . $now->format('g:i A') . ". Break duration: {$duration}."];
+
+    return [
+        'ok' => true,
+        'code' => 'OK',
+        'message' => 'Break ended at ' . $now->format('g:i A') . ". Break duration: {$duration}.",
+        'break_end' => $now->format('g:i:s A'),
+        'duration' => $duration,
+    ];
 }
 
 /**
@@ -261,7 +379,7 @@ function do_time_out(int $userId): array {
         return ['ok' => false, 'code' => 'NO_ACTIVE_SESSION', 'error' => 'You cannot Time Out because you have not Timed In today.'];
     }
 
-    if ($openRow['break_start'] && !$openRow['break_end']) {
+    if (get_active_break((int) $openRow['id'])) {
         return ['ok' => false, 'code' => 'BREAK_IN_PROGRESS', 'error' => 'Please end your break before timing out.'];
     }
 
@@ -272,23 +390,34 @@ function do_time_out(int $userId): array {
     try {
         // Scoped to this exact row's primary key (captured above) plus the same
         // time_out IS NULL guard — row-level locking makes this atomic: under a true
-        // race, only the first concurrent request can ever match and update it.
+        // race, only the first concurrent request can ever match and update it. The
+        // NOT EXISTS guard re-checks for an active break at the moment of the write,
+        // so a break started concurrently (after the pre-check above, before this
+        // UPDATE runs) still can't be missed — the write simply fails, same as any
+        // other race here, rather than timing out over an open break.
         $stmt = $pdo->prepare(
             'UPDATE attendance SET time_out = ?
              WHERE id = ? AND user_id = ? AND time_out IS NULL AND time_in IS NOT NULL
-               AND (break_start IS NULL OR break_end IS NOT NULL)'
+               AND NOT EXISTS (SELECT 1 FROM breaks WHERE breaks.attendance_id = attendance.id AND breaks.break_end IS NULL)'
         );
         $stmt->execute([$now->format('Y-m-d H:i:s'), $openRow['id'], $userId]);
 
         if ($stmt->rowCount() === 0) {
             $pdo->rollBack();
+            if (get_active_break((int) $openRow['id'])) {
+                return ['ok' => false, 'code' => 'BREAK_IN_PROGRESS', 'error' => 'Please end your break before timing out.'];
+            }
             return ['ok' => false, 'code' => 'ALREADY_TIMED_OUT', 'error' => 'You have already timed out today.'];
         }
 
-        // TOTAL WORKED = Time Out − Time In, computed from the actual stored
-        // datetimes (never a formatted display string). No break deduction: this
-        // version has no break functionality, and break_start/break_end are never set.
-        $workedMinutes = max(0, (int) round(($now->getTimestamp() - strtotime($openRow['time_in'])) / 60));
+        // TOTAL WORKED = Time Out − Time In − total completed break duration,
+        // computed from the actual stored datetimes/durations (never a formatted
+        // display string) — the same formula calculate_worked_minutes() uses
+        // everywhere else, applied here directly since we're already inside the
+        // transaction and know the exact end timestamp.
+        $elapsedMinutes = max(0, (int) round(($now->getTimestamp() - strtotime($openRow['time_in'])) / 60));
+        $breakMinutes = (int) round(sum_break_seconds((int) $openRow['id']) / 60);
+        $workedMinutes = max(0, $elapsedMinutes - $breakMinutes);
 
         $summary = calculate_ojt_summary($userId);
         // Same connection/transaction sees its own uncommitted write above, so this
@@ -332,20 +461,30 @@ function do_time_out(int $userId): array {
 }
 
 /**
- * Minutes worked for one attendance row. While still clocked in (no time_out),
- * computes a live "so far" figure using the current time, stopping at
- * break_start if currently on break — this value is never stored.
+ * Minutes worked for one attendance row — the single source of truth reused
+ * identically by the Dashboard, Attendance History, OJT Progress, and Admin
+ * Attendance. Requires $row['id'] (the attendance row's primary key) so it can
+ * look up actual recorded breaks for that day.
+ *
+ * WORKED = (Time Out or now) − Time In − total completed break duration.
+ *
+ * While still clocked in (no time_out) and $liveIfOngoing, computes a live
+ * "so far" figure using the current time — stopping at the active break's
+ * start if one is in progress, since time spent on an unfinished break isn't
+ * worked time yet. This live figure is never stored, only ever computed.
  */
 function calculate_worked_minutes(array $row, bool $liveIfOngoing = true): int {
     if (!$row['time_in']) {
         return 0;
     }
 
+    $attendanceId = (int) $row['id'];
     $start = strtotime($row['time_in']);
-    $end = $row['time_out'] ? strtotime($row['time_out']) : ($liveIfOngoing ? time() : null);
+    $activeBreak = ($liveIfOngoing && !$row['time_out']) ? get_active_break($attendanceId) : null;
 
-    if ($row['time_out'] === null && $row['break_start'] && !$row['break_end'] && $liveIfOngoing) {
-        $end = strtotime($row['break_start']);
+    $end = $row['time_out'] ? strtotime($row['time_out']) : ($liveIfOngoing ? time() : null);
+    if ($activeBreak) {
+        $end = strtotime($activeBreak['break_start']);
     }
 
     if ($end === null) {
@@ -353,20 +492,14 @@ function calculate_worked_minutes(array $row, bool $liveIfOngoing = true): int {
     }
 
     $totalMinutes = max(0, (int) round(($end - $start) / 60));
-
-    $breakMinutes = 0;
-    if ($row['break_start'] && $row['break_end']) {
-        $breakMinutes = max(0, (int) round((strtotime($row['break_end']) - strtotime($row['break_start'])) / 60));
-    }
+    $breakMinutes = (int) round(sum_break_seconds($attendanceId) / 60);
 
     return max(0, $totalMinutes - $breakMinutes);
 }
 
-function calculate_break_minutes(array $row): ?int {
-    if (!$row['break_start'] || !$row['break_end']) {
-        return null;
-    }
-    return max(0, (int) round((strtotime($row['break_end']) - strtotime($row['break_start'])) / 60));
+/** Total completed break minutes for one attendance row, for display purposes. */
+function calculate_break_minutes_for_attendance(int $attendanceId): int {
+    return (int) round(sum_break_seconds($attendanceId) / 60);
 }
 
 function format_minutes(int $minutes): string {
@@ -444,12 +577,8 @@ function get_attendance_history(int $userId, array $filters): array {
     $page = max(1, (int) ($filters['page'] ?? 1));
     $offset = ($page - 1) * $perPage;
 
-    // break_start/break_end are always NULL in this break-less version, but are
-    // still selected because calculate_worked_minutes() (the single source of
-    // truth for worked-hours math, reused here rather than recalculated) expects
-    // those array keys to be present.
     $stmt = $pdo->prepare(
-        "SELECT id, attendance_date, time_in, time_out, status, break_start, break_end
+        "SELECT id, attendance_date, time_in, time_out, status
          FROM attendance
          WHERE {$whereSql}
          ORDER BY attendance_date DESC
@@ -493,7 +622,7 @@ function calculate_ojt_summary(int $userId): array {
     $requiredMinutes = (int) ($profileStmt->fetchColumn() ?: 0);
 
     $stmt = $pdo->prepare(
-        'SELECT time_in, break_start, break_end, time_out FROM attendance
+        'SELECT id, time_in, time_out FROM attendance
          WHERE user_id = ? AND time_out IS NOT NULL'
     );
     $stmt->execute([$userId]);

@@ -13,8 +13,13 @@ date_default_timezone_set('Asia/Manila');
 define('APP_URL', 'http://localhost/OJT-system');
 define('APP_NAME', 'OJT-system');
 
-// Attendance business rules (no Admin Settings UI yet — these are the defaults)
+// Attendance business rules — app-wide defaults, used whenever a student has no
+// custom row in ojt_schedules for that day (see includes/attendance.php::get_effective_schedule()).
+// Admin can override per student/per day-of-week; these are only the fallback.
 define('WORKDAY_START_TIME', '08:00:00');
+define('WORKDAY_END_TIME', '17:00:00');
+define('DEFAULT_BREAK_START', '12:00:00');
+define('DEFAULT_BREAK_END', '13:00:00');
 define('LATE_GRACE_MINUTES', 15);
 define('STANDARD_SHIFT_MINUTES', 480); // 8 hours
 

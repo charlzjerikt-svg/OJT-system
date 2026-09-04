@@ -440,6 +440,7 @@ select.input-success {
 
 .status-pill.status-timed_in,
 .status-pill.status-ongoing { background: var(--color-info-bg); color: var(--color-primary); }
+.status-pill.status-on_break { background: var(--color-warning-bg); color: var(--color-warning); }
 .status-pill.status-completed { background: var(--color-success-bg); color: var(--color-success); }
 .status-pill.status-not_timed_in,
 .status-pill.status-not_started { background: var(--color-bg); color: var(--color-text-muted); }

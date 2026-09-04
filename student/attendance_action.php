@@ -25,6 +25,8 @@ $action = $_POST['action'] ?? '';
 // reads a date, time, or student identifier from the request body.
 $result = match ($action) {
     'time_in' => do_time_in($user['id']),
+    'start_break' => do_start_break($user['id']),
+    'end_break' => do_end_break($user['id']),
     'time_out' => do_time_out($user['id']),
     default => ['ok' => false, 'code' => 'UNKNOWN_ACTION', 'error' => 'Unknown action.'],
 };
@@ -54,5 +56,9 @@ if ($action === 'time_in') {
         'total_hours' => $result['total_hours'],
         'status' => $result['status'],
     ];
+} elseif ($action === 'start_break') {
+    $response['data'] = ['break_start' => $result['break_start']];
+} elseif ($action === 'end_break') {
+    $response['data'] = ['break_end' => $result['break_end'], 'duration' => $result['duration']];
 }
 json_response($response);

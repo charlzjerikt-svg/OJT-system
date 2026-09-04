@@ -55,7 +55,7 @@ if ($company !== '') {
 }
 
 $stmt = $pdo->prepare(
-    "SELECT u.student_id, u.full_name, a.attendance_date, a.time_in, a.time_out, a.status, a.break_start, a.break_end
+    "SELECT a.id, u.student_id, u.full_name, a.attendance_date, a.time_in, a.time_out, a.status
      FROM attendance a
      JOIN users u ON u.id = a.user_id
      LEFT JOIN student_profiles sp ON sp.user_id = u.id
@@ -72,15 +72,17 @@ header('Content-Disposition: attachment; filename="attendance_export_' . date('Y
 header('Cache-Control: no-store');
 
 $out = fopen('php://output', 'w');
-fputcsv($out, ['Student ID', 'Student Name', 'Date', 'Time In', 'Time Out', 'Worked Hours', 'Status']);
+fputcsv($out, ['Student ID', 'Student Name', 'Date', 'Time In', 'Break', 'Time Out', 'Worked Hours', 'Status']);
 
 while ($row = $stmt->fetch()) {
+    $breakMinutes = calculate_break_minutes_for_attendance((int) $row['id']);
     $worked = $row['time_out'] ? format_minutes(calculate_worked_minutes($row, false)) : 'In Progress';
     fputcsv($out, [
         $row['student_id'] ?? '',
         $row['full_name'],
         $row['attendance_date'],
         $row['time_in'] ? date('g:i A', strtotime($row['time_in'])) : '',
+        $breakMinutes > 0 ? format_minutes($breakMinutes) : '',
         $row['time_out'] ? date('g:i A', strtotime($row['time_out'])) : '',
         $worked,
         $row['time_out'] ? ucfirst($row['status']) : 'Incomplete',
