@@ -52,7 +52,7 @@ function sort_link(string $col, string $label): string {
 }
 
 $pageTitle = 'Student Management';
-$extraScripts = [APP_URL . '/assets/js/admin.js'];
+$extraScripts = ['/assets/js/admin.js'];
 include __DIR__ . '/../includes/partials/header.php';
 ?>
 <div class="card card-wide">

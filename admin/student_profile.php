@@ -44,7 +44,7 @@ if ($fullName === '') {
 }
 
 $pageTitle = $fullName;
-$extraScripts = [APP_URL . '/assets/js/admin.js'];
+$extraScripts = ['/assets/js/admin.js'];
 include __DIR__ . '/../includes/partials/header.php';
 ?>
 <div class="card card-wide">

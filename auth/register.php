@@ -108,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pageTitle = 'Student Registration';
-$extraScripts = [APP_URL . '/assets/js/register.js'];
+$extraScripts = ['/assets/js/register.js'];
 include __DIR__ . '/../includes/partials/header.php';
 ?>
 <div class="card card-wide">

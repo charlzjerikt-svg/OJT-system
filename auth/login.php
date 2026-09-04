@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $pageTitle = 'Login';
-$extraScripts = [APP_URL . '/assets/js/login.js'];
+$extraScripts = ['/assets/js/login.js'];
 include __DIR__ . '/../includes/partials/header.php';
 ?>
 <div class="card">

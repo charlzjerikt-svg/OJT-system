@@ -75,7 +75,7 @@ function fmt_time_admin2(?string $datetime): string {
 $rangeLabels = ['today' => 'Today', 'week' => 'This Week', 'month' => 'This Month', 'all' => 'All Records'];
 
 $pageTitle = 'Attendance Management';
-$extraScripts = [APP_URL . '/assets/js/admin.js'];
+$extraScripts = ['/assets/js/admin.js'];
 include __DIR__ . '/../includes/partials/header.php';
 ?>
 <div class="card card-wide">

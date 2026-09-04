@@ -27,6 +27,19 @@ function client_ip(): string {
 }
 
 /**
+ * Builds a static asset URL with a cache-busting query string derived from the
+ * file's own last-modified time — so a browser that already cached an old
+ * version of e.g. dashboard.js is guaranteed to fetch the new one the moment
+ * the file changes on disk, with no manual "hard refresh" required. $path is
+ * relative to the project root, e.g. '/assets/js/dashboard.js'.
+ */
+function asset_url(string $path): string {
+    $fsPath = __DIR__ . '/..' . $path;
+    $version = is_file($fsPath) ? filemtime($fsPath) : time();
+    return APP_URL . $path . '?v=' . $version;
+}
+
+/**
  * Returns an array of validation error messages, empty if the password is strong enough.
  */
 function validate_password_strength(string $password): array {

@@ -66,7 +66,7 @@ $punctualityLabels = ['present' => 'Present', 'late' => 'Late'];
 $punctuality = $today['status'] ?? null;
 
 $pageTitle = 'Student Dashboard';
-$extraScripts = [APP_URL . '/assets/js/dashboard.js'];
+$extraScripts = ['/assets/js/dashboard.js'];
 include __DIR__ . '/../includes/partials/header.php';
 ?>
 <div class="card card-wide">
