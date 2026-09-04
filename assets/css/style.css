@@ -446,6 +446,10 @@ select.input-success {
 .status-pill.status-present { background: var(--color-success-bg); color: var(--color-success); }
 .status-pill.status-late { background: var(--color-warning-bg); color: var(--color-warning); }
 .status-pill.status-incomplete { background: var(--color-danger-bg); color: var(--color-danger); }
+.status-pill.status-pending { background: var(--color-warning-bg); color: var(--color-warning); }
+.status-pill.status-active { background: var(--color-success-bg); color: var(--color-success); }
+.status-pill.status-inactive { background: var(--color-bg); color: var(--color-text-muted); }
+.status-pill.status-rejected { background: var(--color-danger-bg); color: var(--color-danger); }
 
 .attendance-times {
   display: grid;
@@ -652,4 +656,49 @@ select.input-success {
 
 @media (max-width: 640px) {
   .filter-form { flex-direction: column; align-items: stretch; }
+}
+
+/* Admin -------------------------------------------------------------- */
+
+.admin-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-tiny {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 100;
+}
+
+.modal-box {
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 28px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.modal-box h3 { margin: 0 0 8px; font-size: 18px; }
+
+.modal-box textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: var(--font);
+  resize: vertical;
 }
