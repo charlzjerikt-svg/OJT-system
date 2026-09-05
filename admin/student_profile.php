@@ -11,10 +11,11 @@ $profile = get_student_admin_profile($studentId);
 if (!$profile) {
     http_response_code(404);
     $pageTitle = 'Student Not Found';
-    include __DIR__ . '/../includes/partials/header.php';
+    $activeNav = 'students';
+    include __DIR__ . '/../includes/partials/app_header.php';
     echo '<div class="card"><h1>Student not found</h1><p class="subtitle">This student does not exist or is not a student account.</p>'
        . '<a class="btn" href="' . APP_URL . '/admin/students.php">Back to Student Management</a></div>';
-    include __DIR__ . '/../includes/partials/footer.php';
+    include __DIR__ . '/../includes/partials/app_footer.php';
     exit;
 }
 
@@ -44,10 +45,11 @@ if ($fullName === '') {
 }
 
 $pageTitle = $fullName;
+$activeNav = 'students';
 $extraScripts = ['/assets/js/admin.js'];
-include __DIR__ . '/../includes/partials/header.php';
+include __DIR__ . '/../includes/partials/app_header.php';
 ?>
-<div class="card card-wide">
+<div class="card card-fluid">
   <h1><?= e($fullName) ?></h1>
   <p class="subtitle">
     Student ID: <?= e($profile['student_id'] ?? '—') ?>
@@ -99,7 +101,7 @@ include __DIR__ . '/../includes/partials/header.php';
   </div>
 </div>
 
-<div class="card card-wide" style="margin-top:20px;">
+<div class="card card-fluid" style="margin-top:20px;">
   <h2 class="card-section-title">OJT Progress</h2>
   <div class="stat-tile-row">
     <div class="stat-tile"><span class="stat-value"><?= number_format($summary['required_minutes'] / 60, 2) ?> hrs</span><span class="stat-label">Required Hours</span></div>
@@ -113,7 +115,7 @@ include __DIR__ . '/../includes/partials/header.php';
   <p class="attendance-status" style="margin:16px 0 0;">Status: <span class="status-pill status-<?= e($ojtStatus['key']) ?>"><?= e(strtoupper($ojtStatus['label'])) ?></span></p>
 </div>
 
-<div class="card card-wide" style="margin-top:20px;">
+<div class="card card-fluid" style="margin-top:20px;">
   <h2 class="card-section-title">Attendance Summary</h2>
   <div class="stat-tile-row">
     <div class="stat-tile"><span class="stat-value"><?= $attSummary['total_days'] ?></span><span class="stat-label">Total Attendance Days</span></div>
@@ -123,7 +125,7 @@ include __DIR__ . '/../includes/partials/header.php';
   </div>
 </div>
 
-<div class="card card-wide" style="margin-top:20px;">
+<div class="card card-fluid" style="margin-top:20px;">
   <h2 class="card-section-title">Recent Attendance</h2>
   <?php if (!$recent): ?>
     <p class="field-hint">No attendance records yet.</p>
@@ -189,4 +191,4 @@ include __DIR__ . '/../includes/partials/header.php';
     </form>
   </div>
 </div>
-<?php include __DIR__ . '/../includes/partials/footer.php'; ?>
+<?php include __DIR__ . '/../includes/partials/app_footer.php'; ?>

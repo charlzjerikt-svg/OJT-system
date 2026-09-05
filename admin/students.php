@@ -52,10 +52,11 @@ function sort_link(string $col, string $label): string {
 }
 
 $pageTitle = 'Student Management';
+$activeNav = 'students';
 $extraScripts = ['/assets/js/admin.js'];
-include __DIR__ . '/../includes/partials/header.php';
+include __DIR__ . '/../includes/partials/app_header.php';
 ?>
-<div class="card card-wide">
+<div class="card card-fluid">
   <h1>Student Management</h1>
   <p class="subtitle">Approve registrations and manage student accounts.</p>
 
@@ -209,4 +210,4 @@ include __DIR__ . '/../includes/partials/header.php';
     </form>
   </div>
 </div>
-<?php include __DIR__ . '/../includes/partials/footer.php'; ?>
+<?php include __DIR__ . '/../includes/partials/app_footer.php'; ?>

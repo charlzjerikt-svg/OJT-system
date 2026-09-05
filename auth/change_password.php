@@ -49,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $navUser = $user;
 $pageTitle = 'Change Password';
-include __DIR__ . '/../includes/partials/header.php';
+include __DIR__ . '/../includes/partials/app_header.php';
 ?>
 <div class="card">
   <h1>Change Password</h1>
@@ -92,4 +92,4 @@ include __DIR__ . '/../includes/partials/header.php';
     <button type="submit" class="btn">Change Password</button>
   </form>
 </div>
-<?php include __DIR__ . '/../includes/partials/footer.php'; ?>
+<?php include __DIR__ . '/../includes/partials/app_footer.php'; ?>

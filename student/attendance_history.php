@@ -93,9 +93,10 @@ function fmt_time(?string $datetime): string {
 $rangeLabels = ['today' => 'Today', 'week' => 'This Week', 'month' => 'This Month', 'all' => 'All Records'];
 
 $pageTitle = 'Attendance History';
-include __DIR__ . '/../includes/partials/header.php';
+$activeNav = 'attendance';
+include __DIR__ . '/../includes/partials/app_header.php';
 ?>
-<div class="card card-wide">
+<div class="card card-fluid">
   <h1>Attendance History</h1>
   <p class="subtitle">View and monitor your OJT attendance.</p>
 
@@ -226,4 +227,4 @@ include __DIR__ . '/../includes/partials/header.php';
     <a href="<?= APP_URL ?>/student/dashboard.php">&larr; Back to Dashboard</a>
   </div>
 </div>
-<?php include __DIR__ . '/../includes/partials/footer.php'; ?>
+<?php include __DIR__ . '/../includes/partials/app_footer.php'; ?>

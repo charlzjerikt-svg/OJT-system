@@ -75,10 +75,11 @@ function fmt_time_admin2(?string $datetime): string {
 $rangeLabels = ['today' => 'Today', 'week' => 'This Week', 'month' => 'This Month', 'all' => 'All Records'];
 
 $pageTitle = 'Attendance Management';
+$activeNav = 'attendance';
 $extraScripts = ['/assets/js/admin.js'];
-include __DIR__ . '/../includes/partials/header.php';
+include __DIR__ . '/../includes/partials/app_header.php';
 ?>
-<div class="card card-wide">
+<div class="card card-fluid">
   <h1>Attendance Management</h1>
   <p class="subtitle">View, correct, and export student attendance.</p>
 
@@ -210,4 +211,4 @@ include __DIR__ . '/../includes/partials/header.php';
     </form>
   </div>
 </div>
-<?php include __DIR__ . '/../includes/partials/footer.php'; ?>
+<?php include __DIR__ . '/../includes/partials/app_footer.php'; ?>

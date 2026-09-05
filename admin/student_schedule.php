@@ -11,10 +11,11 @@ $profile = get_student_admin_profile($studentId);
 if (!$profile) {
     http_response_code(404);
     $pageTitle = 'Student Not Found';
-    include __DIR__ . '/../includes/partials/header.php';
+    $activeNav = 'schedules';
+    include __DIR__ . '/../includes/partials/app_header.php';
     echo '<div class="card"><h1>Student not found</h1>'
        . '<a class="btn" href="' . APP_URL . '/admin/students.php">Back to Student Management</a></div>';
-    include __DIR__ . '/../includes/partials/footer.php';
+    include __DIR__ . '/../includes/partials/app_footer.php';
     exit;
 }
 
@@ -30,9 +31,10 @@ function fmt_hhmm(?string $time): string {
 }
 
 $pageTitle = 'Manage Schedule';
-include __DIR__ . '/../includes/partials/header.php';
+$activeNav = 'schedules';
+include __DIR__ . '/../includes/partials/app_header.php';
 ?>
-<div class="card card-wide">
+<div class="card card-fluid">
   <h1>OJT Schedule — <?= e($fullName) ?></h1>
   <p class="subtitle">Set this student's expected Time In, Break, and Time Out for each day of the week. A day left as "Day Off" is not a valid working day for Time In. Leave a day untouched to keep the app-wide default (<?= e(date('g:i A', strtotime(WORKDAY_START_TIME))) ?> – <?= e(date('g:i A', strtotime(WORKDAY_END_TIME))) ?>, break <?= e(date('g:i A', strtotime(DEFAULT_BREAK_START))) ?> – <?= e(date('g:i A', strtotime(DEFAULT_BREAK_END))) ?>).</p>
 
@@ -66,4 +68,4 @@ include __DIR__ . '/../includes/partials/header.php';
     </div>
   </form>
 </div>
-<?php include __DIR__ . '/../includes/partials/footer.php'; ?>
+<?php include __DIR__ . '/../includes/partials/app_footer.php'; ?>

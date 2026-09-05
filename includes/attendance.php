@@ -461,6 +461,49 @@ function do_time_out(int $userId): array {
 }
 
 /**
+ * Scheduled NET working minutes for the day — end_time minus start_time, minus
+ * the scheduled break window if one is set. Net, because this is compared
+ * directly against calculate_worked_minutes(), which itself already excludes
+ * break time; comparing against the gross span would make even a perfectly
+ * on-time, full-day student register as short by exactly the break duration.
+ */
+function schedule_duration_minutes(array $schedule): int {
+    if (!$schedule['is_active']) {
+        return 0;
+    }
+    $minutes = (int) round((strtotime($schedule['end_time']) - strtotime($schedule['start_time'])) / 60);
+    if (!empty($schedule['break_start']) && !empty($schedule['break_end'])) {
+        $breakMinutes = (int) round((strtotime($schedule['break_end']) - strtotime($schedule['break_start'])) / 60);
+        $minutes -= max(0, $breakMinutes);
+    }
+    return max(0, $minutes);
+}
+
+/**
+ * A day's completion quality — PRESENT/LATE (punctuality, from attendance.status,
+ * set once at Time In) combined with COMPLETED/INCOMPLETE (whether actual worked
+ * minutes met the scheduled shift length). Purely derived every time it's called
+ * from calculate_worked_minutes() + schedule_duration_minutes() — nothing here is
+ * stored, so it can never drift from the numbers it's summarizing. Only meaningful
+ * once time_out is set; callers should check that first.
+ */
+function get_daily_completion_status(int $workedMinutes, int $requiredMinutes, ?string $punctuality): array {
+    $late = $punctuality === 'late';
+    $complete = $requiredMinutes > 0 ? $workedMinutes >= $requiredMinutes : true;
+
+    if ($late && $complete) {
+        return ['key' => 'late', 'label' => 'Late • Completed'];
+    }
+    if ($late && !$complete) {
+        return ['key' => 'incomplete', 'label' => 'Late • Incomplete'];
+    }
+    if (!$complete) {
+        return ['key' => 'incomplete', 'label' => 'Incomplete'];
+    }
+    return ['key' => 'present', 'label' => 'Completed'];
+}
+
+/**
  * Minutes worked for one attendance row — the single source of truth reused
  * identically by the Dashboard, Attendance History, OJT Progress, and Admin
  * Attendance. Requires $row['id'] (the attendance row's primary key) so it can
